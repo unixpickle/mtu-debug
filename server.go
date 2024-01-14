@@ -27,6 +27,8 @@ func (s *Server) Run() {
 	essentials.Must(err)
 	defer conn.Close()
 
+	go LogICMPMessages(&addr)
+
 	for {
 		data := make([]byte, 16384)
 		oob := make([]byte, 16384)

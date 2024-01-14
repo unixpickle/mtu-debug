@@ -44,6 +44,8 @@ func (c *Client) Run() {
 	essentials.Must(err)
 	defer conn.Close()
 
+	go LogICMPMessages(conn.LocalAddr().(*net.UDPAddr))
+
 	data := make([]byte, c.RequestSize)
 	data[0] = byte(c.ResponseSize >> 8)
 	data[1] = byte(c.ResponseSize)
