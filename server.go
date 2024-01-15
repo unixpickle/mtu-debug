@@ -1,9 +1,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"log"
-	"net"
+	"time"
 
 	"github.com/unixpickle/essentials"
 )
@@ -19,35 +20,33 @@ func (s *Server) FlagSet() *flag.FlagSet {
 }
 
 func (s *Server) Run() {
-	addr := net.UDPAddr{
-		Port: s.Port,
-		IP:   net.IPv4zero,
-	}
-	conn, err := net.ListenUDP("udp", &addr)
+	conn, err := NewPacketConnServer(s.Port)
 	essentials.Must(err)
 	defer conn.Close()
 
-	go LogICMPMessages(&addr)
-
 	for {
-		data := make([]byte, 16384)
-		oob := make([]byte, 16384)
-		n, _, _, addr, err := conn.ReadMsgUDP(data, oob)
-		essentials.Must(err)
-		if n < 2 {
-			log.Printf("%s: received %d bytes, expected at least 2", addr, n)
+		data, udpAddr, ipAddr, err := conn.Recv(time.Minute)
+		if errors.Is(err, ErrTimeout) {
 			continue
 		}
-		respSize := (int(data[0]) << 8) | int(data[1])
-		resp := make([]byte, respSize)
-		for i := range resp {
-			resp[i] = data[i%n]
+		essentials.Must(err)
+		if udpAddr != nil {
+			if len(data) < 2 {
+				log.Printf("%s: received %d bytes, expected at least 2", udpAddr, len(data))
+				continue
+			}
+			respSize := (int(data[0]) << 8) | int(data[1])
+			resp := make([]byte, respSize)
+			for i := range resp {
+				resp[i] = data[i%len(data)]
+			}
+			log.Printf("%s: responding to %d bytes with %d bytes", udpAddr, len(data), len(resp))
+			err = conn.Send(resp, udpAddr)
+			if err != nil {
+				log.Printf("%s: failed to send data: %s", udpAddr, err)
+			}
+		} else {
+			LogICMPMessage(ipAddr, data)
 		}
-		log.Printf("%s: responding to %d bytes with %d bytes", addr, n, len(resp))
-		n, _, err = conn.WriteMsgUDP(resp, nil, addr)
-		if err != nil {
-			log.Printf("%s: failed to send data: %s", addr, err)
-		}
-		log.Printf("%s: actually sent %d bytes", addr, n)
 	}
 }

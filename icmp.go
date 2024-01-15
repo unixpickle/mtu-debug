@@ -5,41 +5,28 @@ import (
 	"net"
 
 	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
-const (
-	ICMPv4 = 1
-	ICMPv6 = 58
-)
-
-func LogICMPMessages(addr *net.UDPAddr) {
-	protoStr := "ip4:icmp"
-	proto := ICMPv4
-	if addr.IP.To4() == nil {
-		protoStr = "ip6:ipv6-icmp"
-		proto = ICMPv6
-	}
-	packetConn, err := icmp.ListenPacket(protoStr, addr.IP.String())
+func LogICMPMessage(src *net.IPAddr, data []byte) {
+	icmpMessage, err := icmp.ParseMessage(icmpProtocolNumber, data)
 	if err != nil {
-		log.Printf("WARNING: cannot listen for ICMP packets: %s", err)
+		log.Printf("%s: invalid ICMP message: %s", src, err)
 		return
 	}
-	defer packetConn.Close()
-	for {
-		packet := make([]byte, 32768)
-		size, addr, err := packetConn.ReadFrom(packet)
+	if msg, ok := icmpMessage.Body.(*icmp.DstUnreach); ok {
+		origHeader, err := ipv4.ParseHeader(msg.Data)
 		if err != nil {
-			log.Printf("WARNING: error reading ICMP traffic: %s", err)
+			log.Printf("%s: invalid IP header inside ICMP unreachable message: %s", src, err)
 			return
 		}
-		packet = packet[:size]
-		msg, err := icmp.ParseMessage(proto, packet)
-		if err != nil {
-			log.Printf("ICMP from %s: failed to parse: %s", addr, err)
-			continue
+		if icmpMessage.Code == 4 {
+			nextMtu := (int(data[6]) << 8) | int(data[7])
+			log.Printf("%s: ICMP: destination (%s) unreachable; fragmentation needed (mtu=%d)",
+				src, origHeader.Dst, nextMtu)
 		}
-		if ptb, ok := msg.Body.(*icmp.PacketTooBig); ok {
-			log.Printf("ICMP from %s: packet too big (MTU=%d)", addr, ptb.MTU)
-		}
+	} else {
+		log.Printf("%s: ICMP message: type=%d, code=%d, size=%d",
+			src, icmpMessage.Type, icmpMessage.Code, len(data))
 	}
 }

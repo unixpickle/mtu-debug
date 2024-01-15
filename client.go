@@ -1,12 +1,10 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"log"
 	"math/rand"
 	"net"
-	"os"
 	"time"
 
 	"github.com/unixpickle/essentials"
@@ -36,15 +34,10 @@ func (c *Client) Run() {
 	if c.ResponseSize < 1 {
 		essentials.Die("response must be at least 1 byte")
 	}
-	addr := &net.UDPAddr{
-		Port: c.Port,
-		IP:   net.ParseIP(c.Host),
-	}
-	conn, err := net.DialUDP("udp", nil, addr)
+
+	conn, err := NewPacketConnClient(net.ParseIP(c.Host), c.Port)
 	essentials.Must(err)
 	defer conn.Close()
-
-	go LogICMPMessages(conn.LocalAddr().(*net.UDPAddr))
 
 	data := make([]byte, c.RequestSize)
 	data[0] = byte(c.ResponseSize >> 8)
@@ -56,36 +49,34 @@ RequestLoop:
 		if i > 0 {
 			time.Sleep(time.Second)
 		}
-		log.Printf("sending request from %s => %s ...", conn.LocalAddr(), addr)
+		log.Printf("sending request from %s => %s:%d ...", conn.LocalAddr(), c.Host, c.Port)
 
-		n, err := conn.Write(data)
+		err := conn.Send(data, nil)
 		essentials.Must(err)
-		if n < c.RequestSize {
-			log.Fatalf("attempted to write %d bytes but wrote %d", c.RequestSize, n)
-		}
 
-		conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-		payload := make([]byte, c.ResponseSize)
-		n, _, _, _, err = conn.ReadMsgUDP(payload, nil)
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			log.Printf("timeout waiting for response; retrying...")
-			continue
-		}
-
-		essentials.Must(err)
-		if n != c.ResponseSize {
-			log.Printf("expected size %d but got %d; retrying...", c.ResponseSize, n)
-			continue
-		}
-
-		for i := 0; i < c.ResponseSize; i++ {
-			if payload[i] != data[i%c.RequestSize] {
-				log.Printf("invalid bytes received; retrying...")
+		for {
+			payload, udpAddr, ipAddr, err := conn.Recv(time.Second)
+			if err != nil {
+				log.Printf("retrying after error: %s", err)
 				continue RequestLoop
+			} else if udpAddr != nil {
+				if len(payload) != c.ResponseSize {
+					log.Printf("expected size %d but got %d; retrying...",
+						c.ResponseSize, len(payload))
+					continue RequestLoop
+				}
+				for i := 0; i < c.ResponseSize; i++ {
+					if payload[i] != data[i%c.RequestSize] {
+						log.Printf("invalid bytes received; retrying...")
+						continue RequestLoop
+					}
+				}
+				log.Println("SUCCESS: received correct response!")
+				return
+			} else {
+				LogICMPMessage(ipAddr, payload)
 			}
 		}
-		log.Println("SUCCESS: received correct response!")
-		return
 	}
 	log.Println("FAIL: giving up after too many attempts!")
 }
