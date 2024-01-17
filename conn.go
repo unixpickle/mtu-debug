@@ -52,8 +52,8 @@ func NewPacketConnClient(dstHost net.IP, dstPort int) (*PacketConn, error) {
 	udpConn, err := net.DialUDP("udp4", nil, addr)
 	essentials.Must(err)
 
-	udpFile, err := createSocket(syscall.IPPROTO_UDP)
-	icmpFile, err := createSocket(syscall.IPPROTO_ICMP)
+	udpFile, err := CreateSocket(syscall.IPPROTO_UDP)
+	icmpFile, err := CreateSocket(syscall.IPPROTO_ICMP)
 
 	p := &PacketConn{
 		rawUDPConn:  udpFile,
@@ -79,8 +79,8 @@ func NewPacketConnServer(port int) (*PacketConn, error) {
 		return nil, err
 	}
 
-	udpFile, err := createSocket(syscall.IPPROTO_UDP)
-	icmpFile, err := createSocket(syscall.IPPROTO_ICMP)
+	udpFile, err := CreateSocket(syscall.IPPROTO_UDP)
+	icmpFile, err := CreateSocket(syscall.IPPROTO_ICMP)
 
 	p := &PacketConn{
 		rawUDPConn:  udpFile,
@@ -95,7 +95,7 @@ func NewPacketConnServer(port int) (*PacketConn, error) {
 	return p, nil
 }
 
-func createSocket(proto int) (*os.File, error) {
+func CreateSocket(proto int) (*os.File, error) {
 	socket, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, proto)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (p *PacketConn) Send(data []byte, addr *net.UDPAddr) error {
 		ID:       rand.Intn(0x10000),
 		Flags:    ipv4.DontFragment,
 		TTL:      32,
-		Protocol: 17, // UDP
+		Protocol: udpProtocolNumber,
 		Src:      srcAddr.IP,
 		Dst:      addr.IP,
 	}
